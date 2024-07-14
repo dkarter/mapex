@@ -2,35 +2,30 @@
 mod tests {
     use assert_cmd::Command;
     use predicates::prelude::*;
+    use std::fs;
 
-    #[test]
-    fn test_mapex_simple() {
-        let mut cmd = Command::cargo_bin("mapex").unwrap();
-        let json_input = r#"{"key": "value"}"#;
-        let map_output = r#"%{"key" => "value"}"#;
+    fn load_fixture(name: &str) -> (String, String) {
+        let json_path = format!("tests/fixtures/{}.json", name);
+        let exs_path = format!("tests/fixtures/{}.exs", name);
 
-        cmd.write_stdin(json_input)
-            .assert()
-            .success()
-            .stdout(predicate::str::contains(map_output));
+        let json_content = fs::read_to_string(json_path).expect("Unable to read JSON fixture");
+        let exs_content = fs::read_to_string(exs_path).expect("Unable to read Elixir fixture");
+
+        (json_content, exs_content)
     }
 
     #[test]
-    fn test_mapex_full() {
-        let mut cmd = Command::cargo_bin("mapex").unwrap();
-        let json_input = r#"{
-          "a_str": "hiii",
-          "hello": ["world", "worlds", "mars", 1, 2,3],
-          "a_num": 6,
-          "a_bool": false,
-          "a_null": null
-        }"#;
+    fn test_mapex_fixtures() {
+        let fixtures = ["simple", "nested", "complex"];
 
-        let map_output = r#"%{"a_bool" => false, "a_null" => nil, "a_num" => 6, "a_str" => "hiii", "hello" => ["world", "worlds", "mars", 1, 2, 3]}"#;
+        fixtures.iter().for_each(|&fixture| {
+            let (json_input, map_output) = load_fixture(fixture);
+            let mut cmd = Command::cargo_bin("mapex").unwrap();
 
-        cmd.write_stdin(json_input)
-            .assert()
-            .success()
-            .stdout(predicate::str::contains(map_output));
+            cmd.write_stdin(json_input)
+                .assert()
+                .success()
+                .stdout(predicate::str::contains(map_output));
+        });
     }
 }

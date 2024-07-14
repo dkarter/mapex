@@ -8,19 +8,18 @@ pub fn convert(json_str: &str) -> String {
 fn to_elixir_map(value: &Value) -> String {
     match value {
         Value::Object(map) => {
-            let elements: Vec<String> = map.iter()
-                .map(|(k,v)| format!("{:?} => {}", k, to_elixir_map(v)))
+            let elements: Vec<String> = map
+                .iter()
+                .map(|(k, v)| format!("{:?} => {}", k, to_elixir_map(v)))
                 .collect();
 
             format!("%{{{}}}", elements.join(", "))
-        },
+        }
         Value::Array(list) => {
-            let elements: Vec<String> = list.iter()
-                .map(|el| to_elixir_map(el))
-                .collect();
+            let elements: Vec<String> = list.iter().map(|el| to_elixir_map(el)).collect();
 
             format!("[{}]", elements.join(", "))
-        },
+        }
         Value::Null => "nil".to_string(),
         Value::String(s) => format!("{:?}", s),
         Value::Bool(b) => b.to_string(),

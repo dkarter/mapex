@@ -6,11 +6,17 @@ struct Cli {
     // Pretty-print the output
     #[arg(short, long)]
     pretty: Option<bool>,
+    // convert keys to atoms
+    #[arg(short, long)]
+    atom_keys: Option<bool>,
 }
 
 impl Default for Cli {
     fn default() -> Self {
-        Cli { pretty: Some(true) }
+        Cli {
+            pretty: Some(true),
+            atom_keys: Some(false),
+        }
     }
 }
 
@@ -20,6 +26,7 @@ fn main() {
 
     let args = Cli {
         pretty: parsed_args.pretty.or(default_args.pretty),
+        atom_keys: parsed_args.atom_keys.or(default_args.pretty),
     };
 
     let mut buffer = String::new();
@@ -31,6 +38,7 @@ fn main() {
         &buffer,
         mapex::ConvertOptions {
             pretty: args.pretty,
+            atom_keys: args.atom_keys,
         },
     );
     println!("{}", elixir_map);

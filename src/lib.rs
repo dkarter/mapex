@@ -1,77 +1,151 @@
-use serde_json::Value;
+use std::collections::HashMap;
+
+use pretty::RcDoc;
+use serde_json::Value as JsonValue;
 
 pub struct ConvertOptions {
     pub pretty: Option<bool>,
+    pub atom_keys: Option<bool>,
 }
 
 pub fn convert(json_str: &str, opts: ConvertOptions) -> String {
-    let json: Value = serde_json::from_str(json_str).expect("Invalid JSON");
+    let json: JsonValue = serde_json::from_str(json_str).expect("Invalid JSON");
+    let elixir_map = ElixirValue::from_json(&json, opts.atom_keys.unwrap());
     if opts.pretty.unwrap() {
-        to_pretty_elixir_map(&json, 0)
+        elixir_map.to_pretty(5)
     } else {
-        to_elixir_map(&json)
+        elixir_map.to_pretty(5)
     }
 }
 
-fn to_elixir_map(value: &Value) -> String {
-    match value {
-        Value::Object(map) => {
-            let elements: Vec<String> = map
-                .iter()
-                .map(|(k, v)| format!("{:?} => {}", k, to_elixir_map(v)))
-                .collect();
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum ElixirKey {
+    Atom(String),
+    Str(String),
+}
 
-            format!("%{{{}}}", elements.join(", "))
-        }
-        Value::Array(list) => {
-            let elements: Vec<String> = list.iter().map(|el| to_elixir_map(el)).collect();
+#[derive(Debug, Clone)]
+enum ElixirValue {
+    Map(HashMap<ElixirKey, ElixirValue>),
+    List(Vec<ElixirValue>),
+    Int(i64),
+    Float(f64),
+    Str(String),
+    Bool(bool),
+    Null,
+}
 
-            format!("[{}]", elements.join(", "))
+// TODO:
+// - [ ] why is this not breaking the lines when the width is only 5
+// - [ ] try this library instead: https://crates.io/crates/elegance
+
+impl ElixirKey {
+    pub fn to_doc(&self) -> RcDoc {
+        match *self {
+            ElixirKey::Atom(ref atom) => {
+                // protect against atoms that contain illegal atom syntax by wrapping them with a
+                // string
+                let atom_doc = if atom.contains(" ") {
+                    RcDoc::text("\"")
+                        .append(RcDoc::as_string(atom))
+                        .append(RcDoc::text("\""))
+                } else {
+                    RcDoc::as_string(atom)
+                };
+
+                atom_doc.append(RcDoc::text(":")).append(RcDoc::space())
+            }
+
+            ElixirKey::Str(ref str) => RcDoc::text("\"")
+                .append(RcDoc::as_string(str))
+                .append(RcDoc::text("\""))
+                .append(RcDoc::space())
+                .append(RcDoc::text("=>"))
+                .append(RcDoc::space()),
         }
-        Value::Null => "nil".to_string(),
-        Value::String(s) => format!("{:?}", s),
-        Value::Bool(b) => b.to_string(),
-        Value::Number(n) => n.to_string(),
     }
 }
 
-fn to_pretty_elixir_map(value: &Value, indent: usize) -> String {
-    match value {
-        Value::Object(map) => {
-            let outer_indent = create_indent(indent);
-            let inner_indent = create_indent(indent + 2);
+impl ElixirValue {
+    fn from_json(value: &JsonValue, atom_keys: bool) -> Self {
+        match value {
+            JsonValue::Object(map) => {
+                let mut elixir_map = HashMap::new();
+                for (k, v) in map {
+                    let key = if atom_keys {
+                        ElixirKey::Atom(k.clone())
+                    } else {
+                        ElixirKey::Str(k.clone())
+                    };
 
-            let elements: Vec<String> = map
-                .iter()
-                .map(|(k, v)| {
-                    format!(
-                        "{}{:?} => {}",
-                        inner_indent,
-                        k,
-                        to_pretty_elixir_map(v, indent + 2)
+                    let value = ElixirValue::from_json(v, atom_keys);
+                    elixir_map.insert(key, value);
+                }
+                ElixirValue::Map(elixir_map)
+            }
+            JsonValue::Array(vec) => {
+                let elixir_vec = vec
+                    .iter()
+                    .map(|v| ElixirValue::from_json(v, atom_keys))
+                    .collect();
+                ElixirValue::List(elixir_vec)
+            }
+            JsonValue::String(s) => ElixirValue::Str(s.clone()),
+            JsonValue::Number(num) => {
+                if let Some(i) = num.as_i64() {
+                    ElixirValue::Int(i)
+                } else if let Some(f) = num.as_f64() {
+                    ElixirValue::Float(f)
+                } else {
+                    panic!("Unexpected number type")
+                }
+            }
+            JsonValue::Bool(b) => ElixirValue::Bool(*b),
+            JsonValue::Null => ElixirValue::Null,
+        }
+    }
+
+    pub fn to_doc(&self) -> RcDoc {
+        match *self {
+            ElixirValue::Str(ref str) => {
+                RcDoc::text("\"").append(RcDoc::as_string(str)).append("\"")
+            }
+
+            ElixirValue::Map(ref map) => RcDoc::text("%{")
+                .append(
+                    RcDoc::intersperse(
+                        map.into_iter().map(|(k, v)| k.to_doc().append(v.to_doc())),
+                        RcDoc::text(",").append(RcDoc::space()),
                     )
-                })
-                .collect();
+                    .nest(2)
+                    .group(),
+                )
+                .append(RcDoc::text("}")),
 
-            // TODO: this can be more intelligent, and only break new lines when the map is a
-            // certain size, but this is good enough for a first pass
-            format!("%{{\n{}\n{}}}", elements.join(", "), outer_indent)
-        }
-        Value::Array(list) => {
-            let elements: Vec<String> = list
-                .iter()
-                .map(|el| to_pretty_elixir_map(el, indent))
-                .collect();
+            ElixirValue::List(ref list) => RcDoc::text("[")
+                .append(
+                    RcDoc::intersperse(
+                        list.into_iter().map(|v| v.to_doc()),
+                        RcDoc::text(",").append(RcDoc::space()),
+                    )
+                    .nest(2)
+                    .group(),
+                )
+                .append(RcDoc::text("]")),
 
-            format!("[{}]", elements.join(", "))
+            ElixirValue::Bool(ref bool) => RcDoc::as_string(bool),
+
+            ElixirValue::Int(ref int) => RcDoc::as_string(int),
+
+            ElixirValue::Float(ref float) => RcDoc::as_string(float),
+
+            ElixirValue::Null => RcDoc::text("nil"),
         }
-        Value::Null => "nil".to_string(),
-        Value::String(s) => format!("{:?}", s),
-        Value::Bool(b) => b.to_string(),
-        Value::Number(n) => n.to_string(),
     }
-}
 
-fn create_indent(size: usize) -> String {
-    std::iter::repeat(' ').take(size).collect()
+    pub fn to_pretty(&self, width: usize) -> String {
+        let mut w = Vec::new();
+        self.to_doc().render(width, &mut w).unwrap();
+        String::from_utf8(w).unwrap()
+    }
 }
